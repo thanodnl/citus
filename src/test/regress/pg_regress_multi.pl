@@ -67,12 +67,14 @@ my %fdws = ();
 my %fdwServers = ();
 my %functions = ();
 my %operators = ();
+my $opensslPath = "openssl";
 my $valgrind = 0;
 my $valgrindPath = "valgrind";
 my $valgrindLogFile = "valgrind_test_log.txt";
 my $pgCtlTimeout = undef;
 my $connectionTimeout = 5000;
 my $useMitmproxy = 0;
+my $disableSSL = 0;
 my $mitmFifoPath = catfile("tmp_check", "mitmproxy.fifo");
 
 my $serversAreShutdown = "TRUE";
@@ -102,6 +104,8 @@ GetOptions(
     'pg_ctl-timeout=s' => \$pgCtlTimeout,
     'connection-timeout=s' => \$connectionTimeout,
     'mitmproxy' => \$useMitmproxy,
+    'nossl' => \$disableSSL,
+    'openssl-path=s' => \$opensslPath,
     'help' => sub { Usage() });
 
 # Update environment to include [DY]LD_LIBRARY_PATH/LIBDIR/etc -
@@ -313,10 +317,17 @@ push(@pgOptions, '-c', "citus.remote_task_check_interval=1ms");
 push(@pgOptions, '-c', "citus.shard_replication_factor=2");
 push(@pgOptions, '-c', "citus.node_connection_timeout=${connectionTimeout}");
 
-if ($useMitmproxy)
+if ($useMitmproxy || $disableSSL)
 {
   # make tests reproducible by never trying to negotiate ssl
   push(@pgOptions, '-c', "citus.node_conninfo=sslmode=disable");
+}
+else
+{
+  push(@pgOptions, '-c', "ssl=on");
+  push(@pgOptions, '-c', "ssl_cert_file=server.crt");
+  push(@pgOptions, '-c', "ssl_key_file=server.key");
+  push(@pgOptions, '-c', "citus.node_conninfo=sslmode=require");
 }
 
 if ($useMitmproxy)
@@ -481,8 +492,17 @@ if ($followercluster)
 }
 
 # Create new data directories, copy workers for speed
-system(catfile("$bindir", "initdb"), ("--nosync", "-U", $user, "--encoding", "UTF8", catfile("tmp_check", "master", "data"))) == 0
+my $masterDir = catfile("tmp_check", "master", "data");
+system(catfile("$bindir", "initdb"), ("--nosync", "-U", $user, "--encoding", "UTF8", $masterDir)) == 0
     or die "Could not create master data directory";
+
+if (!$disableSSL)
+{
+	system($opensslPath, 'req', '-nodes', '-newkey', 'rsa:2048', '-keyout', "$masterDir/server.key", '-out', "$masterDir/server.csr", '-subj', '/C=US/');
+	system($opensslPath, 'x509', '-req', '-sha256', '-days', '365', '-in', "$masterDir/server.csr", '-signkey', "$masterDir/server.key", '-out', "$masterDir/server.crt");
+	chmod 0600, "$masterDir/server.key" or die $!;
+	chmod 0600, "$masterDir/server.crt" or die $!;
+}
 
 if ($followercluster)
 {
@@ -507,6 +527,19 @@ else
 	{
 	    system("cp", ("-a", catfile("tmp_check", "master", "data"), catfile("tmp_check", "worker.$port", "data"))) == 0
 	        or die "Could not create worker data directory";
+	}
+}
+
+if (!$disableSSL)
+{
+	for my $port (@workerPorts)
+	{
+		my $workerDir = catfile("tmp_check", "worker.$port", "data");
+
+		system($opensslPath, 'req', '-nodes', '-newkey', 'rsa:2048', '-keyout', "$workerDir/server.key", '-out', "$workerDir/server.csr", '-subj', '/C=US/');
+		system($opensslPath, 'x509', '-req', '-sha256', '-days', '365', '-in', "$workerDir/server.csr", '-signkey', "$workerDir/server.key", '-out', "$workerDir/server.crt");
+		chmod 0600, "$workerDir/server.key" or die $!;
+		chmod 0600, "$workerDir/server.crt" or die $!;
 	}
 }
 
