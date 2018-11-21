@@ -128,8 +128,7 @@ extern void AppendCopyRowData(Datum *valueArray, bool *isNullArray,
 extern void AppendCopyBinaryHeaders(CopyOutState headerOutputState);
 extern void AppendCopyBinaryFooters(CopyOutState footerOutputState);
 extern void EndRemoteCopy(int64 shardId, List *connectionList, bool stopOnFailure);
-extern Node * ProcessCopyStmt(CopyStmt *copyStatement, char *completionTag,
-							  bool *commandMustRunAsOwner);
+extern Node * ProcessCopyStmt(CopyStmt *copyStatement, char *completionTag);
 
 
 #endif /* MULTI_COPY_H */

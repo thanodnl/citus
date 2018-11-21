@@ -2471,18 +2471,10 @@ IsCopyResultStmt(CopyStmt *copyStatement)
  * COPYing from distributed tables and preventing unsupported actions. The
  * function returns a modified COPY statement to be executed, or NULL if no
  * further processing is needed.
- *
- * commandMustRunAsOwner is an output parameter used to communicate to the caller whether
- * the copy statement should be executed using elevated privileges. If
- * ProcessCopyStmt that is required, a call to CheckCopyPermissions will take
- * care of verifying the current user's permissions before ProcessCopyStmt
- * returns.
- */
+  */
 Node *
-ProcessCopyStmt(CopyStmt *copyStatement, char *completionTag, bool *commandMustRunAsOwner)
+ProcessCopyStmt(CopyStmt *copyStatement, char *completionTag)
 {
-	*commandMustRunAsOwner = false; /* make sure variable is initialized */
-
 	/*
 	 * Handle special COPY "resultid" FROM STDIN WITH (format result) commands
 	 * for sending intermediate results to workers.
@@ -2587,50 +2579,6 @@ ProcessCopyStmt(CopyStmt *copyStatement, char *completionTag, bool *commandMustR
 			}
 		}
 	}
-
-
-	if (copyStatement->filename != NULL && !copyStatement->is_program)
-	{
-		const char *filename = copyStatement->filename;
-
-		if (CacheDirectoryElement(filename))
-		{
-			/*
-			 * Only superusers are allowed to copy from a file, so we have to
-			 * become superuser to execute copies to/from files used by citus'
-			 * query execution.
-			 *
-			 * XXX: This is a decidedly suboptimal solution, as that means
-			 * that triggers, input functions, etc. run with elevated
-			 * privileges.  But this is better than not being able to run
-			 * queries as normal user.
-			 */
-			*commandMustRunAsOwner = true;
-
-			/*
-			 * Have to manually check permissions here as the COPY is will be
-			 * run as a superuser.
-			 */
-			if (copyStatement->relation != NULL)
-			{
-				CheckCopyPermissions(copyStatement);
-			}
-
-			/*
-			 * Check if we have a "COPY (query) TO filename". If we do, copy
-			 * doesn't accept relative file paths. However, SQL tasks that get
-			 * assigned to worker nodes have relative paths. We therefore
-			 * convert relative paths to absolute ones here.
-			 */
-			if (copyStatement->relation == NULL &&
-				!copyStatement->is_from &&
-				!is_absolute_path(filename))
-			{
-				copyStatement->filename = make_absolute_path(filename);
-			}
-		}
-	}
-
 
 	return (Node *) copyStatement;
 }
