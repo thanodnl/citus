@@ -77,25 +77,41 @@ worker_execute_sql_task(PG_FUNCTION_ARGS)
 	char *queryString = text_to_cstring(queryText);
 	bool binaryCopyFormat = PG_GETARG_BOOL(3);
 
-	EState *estate = NULL;
-	TaskFileDestReceiver *taskFileDest = NULL;
-	ParamListInfo paramListInfo = NULL;
+	int64 tuplesSent = 0;
+	Query *query = NULL;
 
 	/* job directory is created prior to scheduling the task */
 	StringInfo jobDirectoryName = JobDirectoryName(jobId);
 	StringInfo taskFilename = TaskFilename(jobDirectoryName, taskId);
 
+	query = ParseQueryString(queryString);
+	tuplesSent = WorkerExecuteSqlTask(query, taskFilename->data, binaryCopyFormat);
+
+	PG_RETURN_INT64(tuplesSent);
+}
+
+
+/*
+ * WorkerExecuteSqlTask executes an already-parsed query and writes the result
+ * to the given task file.
+ */
+int64
+WorkerExecuteSqlTask(Query *query, char *taskFilename, bool binaryCopyFormat)
+{
+	EState *estate = NULL;
+	TaskFileDestReceiver *taskFileDest = NULL;
+	ParamListInfo paramListInfo = NULL;
+
 	estate = CreateExecutorState();
 	taskFileDest =
-		(TaskFileDestReceiver *) CreateTaskFileDestReceiver(taskFilename->data, estate,
+		(TaskFileDestReceiver *) CreateTaskFileDestReceiver(taskFilename, estate,
 															binaryCopyFormat);
 
-	ExecuteQueryStringIntoDestReceiver(queryString, paramListInfo,
-									   (DestReceiver *) taskFileDest);
+	ExecuteQueryIntoDestReceiver(query, paramListInfo, (DestReceiver *) taskFileDest);
 
 	FreeExecutorState(estate);
 
-	PG_RETURN_INT64(taskFileDest->tuplesSent);
+	return taskFileDest->tuplesSent;
 }
 
 
