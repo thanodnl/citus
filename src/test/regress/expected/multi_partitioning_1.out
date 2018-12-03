@@ -1420,6 +1420,11 @@ SELECT create_distributed_table('partitioning_hash_join_test', 'id');
 ERROR:  relation "partitioning_hash_join_test" does not exist
 LINE 1: SELECT create_distributed_table('partitioning_hash_join_test...
                                         ^
+-- make sure that the outputs are stable
+ANALYZE partitioning_hash_join_test;
+ERROR:  relation "partitioning_hash_join_test" does not exist
+ANALYZE partitioning_hash_test;
+ERROR:  relation "partitioning_hash_test" does not exist
 SELECT success FROM run_command_on_workers('alter system set enable_mergejoin to off');
  success 
 ---------

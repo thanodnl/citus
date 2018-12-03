@@ -993,6 +993,10 @@ CREATE TABLE partitioning_hash_join_test_2 PARTITION OF partitioning_hash_join_t
 
 SELECT create_distributed_table('partitioning_hash_join_test', 'id');
 
+-- make sure that the outputs are stable
+ANALYZE partitioning_hash_join_test;
+ANALYZE partitioning_hash_test;
+
 SELECT success FROM run_command_on_workers('alter system set enable_mergejoin to off');
 SELECT success FROM run_command_on_workers('alter system set enable_nestloop to off');
 SELECT success FROM run_command_on_workers('alter system set enable_indexscan to off');
