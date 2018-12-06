@@ -38,6 +38,7 @@
 #define HLL_ADD_AGGREGATE_NAME "hll_add_agg"
 #define HLL_UNION_AGGREGATE_NAME "hll_union_agg"
 #define HLL_CARDINALITY_FUNC_NAME "hll_cardinality"
+#define HLL_ENABLE_HASH_GUC_NAME "hll.enable_hashagg"
 
 /* Definitions related to Top-N approximations */
 #define TOPN_ADD_AGGREGATE_NAME "topn_add_agg"
