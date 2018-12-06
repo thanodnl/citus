@@ -1,3 +1,5 @@
+now with mergify
+
 ### citus v8.0.1 (November 27, 2018) ###
 
 * Execute SQL tasks using worker_execute_sql_task UDF when using task-tracker
