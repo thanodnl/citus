@@ -53,7 +53,7 @@ static bool StoreCertificate(EVP_PKEY *privateKey, X509 *certificate);
 
 
 PG_FUNCTION_INFO_V1(citus_setup_ssl);
-PG_FUNCTION_INFO_V1(citus_reset_default_for_node_conninfo);
+PG_FUNCTION_INFO_V1(citus_check_defaults_for_sslmode);
 
 
 /*
@@ -107,7 +107,7 @@ citus_setup_ssl(PG_FUNCTION_ARGS)
 
 
 /*
- * citus_reset_default_for_node_conninfo is called in the extension upgrade path when
+ * citus_check_defaults_for_sslmode is called in the extension upgrade path when
  * users upgrade from a previous version to a version that has ssl enabled by default, and
  * only when the changed default value conflicts with the setup of the user.
  *
@@ -119,17 +119,34 @@ citus_setup_ssl(PG_FUNCTION_ARGS)
  * didn't have it enabled already.
  */
 Datum
-citus_reset_default_for_node_conninfo(PG_FUNCTION_ARGS)
+citus_check_defaults_for_sslmode(PG_FUNCTION_ARGS)
 {
-	Node *resetCitusNodeConnInfoParseTree = NULL;
+	bool configChanged = false;
 
-	ereport(LOG, (errmsg("reset citus.node_conninfo to old default value as the new "
-						 "value is incompatible with the current ssl setting")));
+	if (EnableSSL)
+	{
+		/* since ssl is on we do not have to change any sslmode back to prefer */
+		PG_RETURN_NULL();
+	}
 
-	/* execute the alter system statement to reset node_conninfo to the old default*/
-	resetCitusNodeConnInfoParseTree = ParseTreeNode(RESET_CITUS_NODE_CONNINFO);
-	AlterSystemSetConfigFile((AlterSystemStmt *) resetCitusNodeConnInfoParseTree);
-	GloballyReloadConfig();
+	if (strcmp(NodeConninfo, "sslmode=require") == 0)
+	{
+		Node *resetCitusNodeConnInfoParseTree = NULL;
+
+		/* execute the alter system statement to reset node_conninfo to the old default */
+
+		ereport(LOG, (errmsg("reset citus.node_conninfo to old default value as the new "
+							 "value is incompatible with the current ssl setting")));
+
+		resetCitusNodeConnInfoParseTree = ParseTreeNode(RESET_CITUS_NODE_CONNINFO);
+		AlterSystemSetConfigFile((AlterSystemStmt *) resetCitusNodeConnInfoParseTree);
+		configChanged = true;
+	}
+
+	if (configChanged)
+	{
+		GloballyReloadConfig();
+	}
 
 	PG_RETURN_NULL();
 }
