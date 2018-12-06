@@ -293,20 +293,21 @@ QueryContainsAggregateWithHLL(Query *query)
  * the hll.enable_hashagg to false. If it is disabled and the master query contains
  * hll aggregate function, it returns true.
  */
-UseGroupAggregateWithHLL(Query * masterQuery)
+static bool
+UseGroupAggregateWithHLL(Query *masterQuery)
 {
-	Oid hllId = get_extension_oid(HLL_EXTENSION_NAME, false);
+	Oid hllId = get_extension_oid(HLL_EXTENSION_NAME, true);
 	const char *gucStrValue = NULL;
 
 	/* If HLL extension is not loaded, return false */
-	if (hllId == InvalidOid)
+	if (!OidIsValid(hllId))
 	{
 		return false;
 	}
 
 	/* If HLL is loaded but related GUC is not set, return false */
-	gucStrValue = GetConfigOption(HLL_ENABLE_HASH_GUC_NAME, false, false);
-	if (strcmp(gucStrValue, "on") == 0)
+	gucStrValue = GetConfigOption(HLL_ENABLE_HASH_GUC_NAME, true, false);
+	if (gucStrValue != NULL && strcmp(gucStrValue, "on") == 0)
 	{
 		return false;
 	}
