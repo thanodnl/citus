@@ -128,6 +128,24 @@ FROM
   daily_uniques
 GROUP BY(1);
 
+-- Test disabling hash_agg with having
+SET hll.enable_hashagg to ON;
+EXPLAIN(COSTS OFF)
+SELECT
+  day, hll_cardinality(hll_union_agg(unique_users))
+FROM
+  daily_uniques
+GROUP BY(1);
+
+SET hll.enable_hashagg to OFF;
+EXPLAIN(COSTS OFF)
+SELECT
+  day, hll_cardinality(hll_union_agg(unique_users))
+FROM
+  daily_uniques
+GROUP BY(1)
+HAVING hll_cardinality(hll_union_agg(unique_users)) > 1;
+
 DROP TABLE raw_table;
 DROP TABLE daily_uniques;
 

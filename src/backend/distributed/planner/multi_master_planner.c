@@ -43,6 +43,8 @@ static PlannedStmt * BuildSelectStatement(Query *masterQuery, List *masterTarget
 										  CustomScan *remoteScan);
 static Agg * BuildAggregatePlan(Query *masterQuery, Plan *subPlan);
 static bool HasDistinctAggregate(Query *masterQuery);
+static bool UseGroupAggregateWithHLL(Query *masterQuery);
+static bool QueryContainsAggregateWithHLL(Query *query);
 static Plan * BuildDistinctPlan(Query *masterQuery, Plan *subPlan);
 static List * PrepareTargetListForNextPlan(List *targetList);
 
@@ -251,72 +253,6 @@ BuildSelectStatement(Query *masterQuery, List *masterTargetList, CustomScan *rem
 
 
 /*
- * QueryContainsAggregateWithHLL returns true if the query has an hll aggregate
- * function in it's target list.
- */
-static bool
-QueryContainsAggregateWithHLL(Query *query)
-{
-	List *varList = NIL;
-	ListCell *varCell = NULL;
-
-	varList = pull_var_clause((Node *) query->targetList, PVC_INCLUDE_AGGREGATES);
-	foreach(varCell, varList)
-	{
-		Var *var = (Var *) lfirst(varCell);
-
-		if (nodeTag(var) == T_Aggref)
-		{
-			Aggref *aggref = (Aggref *) var;
-			int argCount = list_length(aggref->args);
-			Oid hllId = get_extension_oid(HLL_EXTENSION_NAME, false);
-			Oid hllSchemaOid = get_extension_schema(hllId);
-			const char *hllSchemaName = get_namespace_name(hllSchemaOid);
-			Oid addFunctionId = FunctionOid(hllSchemaName, HLL_ADD_AGGREGATE_NAME,
-											argCount);
-			Oid unionFunctionId = FunctionOid(hllSchemaName, HLL_UNION_AGGREGATE_NAME, 1);
-
-			if (aggref->aggfnoid == addFunctionId || aggref->aggfnoid == unionFunctionId)
-			{
-				return true;
-			}
-		}
-	}
-
-	return false;
-}
-
-
-/*
- * UseGroupAggregateWithHLL first checks whether the HLL extension is loaded, if
- * it is not then simply return false. Otherwise, checks whether the client set
- * the hll.enable_hashagg to false. If it is disabled and the master query contains
- * hll aggregate function, it returns true.
- */
-static bool
-UseGroupAggregateWithHLL(Query *masterQuery)
-{
-	Oid hllId = get_extension_oid(HLL_EXTENSION_NAME, true);
-	const char *gucStrValue = NULL;
-
-	/* If HLL extension is not loaded, return false */
-	if (!OidIsValid(hllId))
-	{
-		return false;
-	}
-
-	/* If HLL is loaded but related GUC is not set, return false */
-	gucStrValue = GetConfigOption(HLL_ENABLE_HASH_GUC_NAME, true, false);
-	if (gucStrValue != NULL && strcmp(gucStrValue, "on") == 0)
-	{
-		return false;
-	}
-
-	return QueryContainsAggregateWithHLL(masterQuery);
-}
-
-
-/*
  * BuildAggregatePlan creates and returns an aggregate plan. This aggregate plan
  * builds aggreation and grouping operators (if any) that are to be executed on
  * the master node.
@@ -458,6 +394,72 @@ HasDistinctAggregate(Query *masterQuery)
 		{
 			Aggref *aggref = (Aggref *) columnNode;
 			if (aggref->aggdistinct != NIL)
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+
+/*
+ * UseGroupAggregateWithHLL first checks whether the HLL extension is loaded, if
+ * it is not then simply return false. Otherwise, checks whether the client set
+ * the hll.enable_hashagg to false. If it is disabled and the master query contains
+ * hll aggregate function, it returns true.
+ */
+static bool
+UseGroupAggregateWithHLL(Query *masterQuery)
+{
+	Oid hllId = get_extension_oid(HLL_EXTENSION_NAME, true);
+	const char *gucStrValue = NULL;
+
+	/* If HLL extension is not loaded, return false */
+	if (!OidIsValid(hllId))
+	{
+		return false;
+	}
+
+	/* If HLL is loaded but related GUC is not set, return false */
+	gucStrValue = GetConfigOption(HLL_ENABLE_HASH_GUC_NAME, true, false);
+	if (gucStrValue != NULL && strcmp(gucStrValue, "on") == 0)
+	{
+		return false;
+	}
+
+	return QueryContainsAggregateWithHLL(masterQuery);
+}
+
+
+/*
+ * QueryContainsAggregateWithHLL returns true if the query has an hll aggregate
+ * function in it's target list.
+ */
+static bool
+QueryContainsAggregateWithHLL(Query *query)
+{
+	List *varList = NIL;
+	ListCell *varCell = NULL;
+
+	varList = pull_var_clause((Node *) query->targetList, PVC_INCLUDE_AGGREGATES);
+	foreach(varCell, varList)
+	{
+		Var *var = (Var *) lfirst(varCell);
+
+		if (nodeTag(var) == T_Aggref)
+		{
+			Aggref *aggref = (Aggref *) var;
+			int argCount = list_length(aggref->args);
+			Oid hllId = get_extension_oid(HLL_EXTENSION_NAME, false);
+			Oid hllSchemaOid = get_extension_schema(hllId);
+			const char *hllSchemaName = get_namespace_name(hllSchemaOid);
+			Oid addFunctionId = FunctionOid(hllSchemaName, HLL_ADD_AGGREGATE_NAME,
+											argCount);
+			Oid unionFunctionId = FunctionOid(hllSchemaName, HLL_UNION_AGGREGATE_NAME, 1);
+
+			if (aggref->aggfnoid == addFunctionId || aggref->aggfnoid == unionFunctionId)
 			{
 				return true;
 			}
