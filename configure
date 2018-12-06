@@ -4156,9 +4156,8 @@ fi
 fi
 
 #
-# openssl, this is automatically required in if postgres has been compiled with openssl
+# openssl, these are added based on if they were configured in the build of postgres
 #
-
 if [[ $POSTGRES_LIBS == *"-lcrypto"* ]]; then
     { $as_echo "$as_me:${as_lineno-$LINENO}: checking for CRYPTO_new_ex_data in -lcrypto" >&5
 $as_echo_n "checking for CRYPTO_new_ex_data in -lcrypto... " >&6; }
@@ -4204,7 +4203,7 @@ _ACEOF
   LIBS="-lcrypto $LIBS"
 
 else
-  as_fn_error $? "library 'crypto' is required for OpenSSL" "$LINENO" 5
+  as_fn_error $? "libcrypto not found. When building Citus against an OpenSSL-enabled postgres libcrypto needs to be available." "$LINENO" 5
 fi
 
 fi
@@ -4253,7 +4252,7 @@ _ACEOF
   LIBS="-lssl $LIBS"
 
 else
-  as_fn_error $? "library 'ssl' is required for OpenSSL" "$LINENO" 5
+  as_fn_error $? "libssl not found. When building Citus against an OpenSSL-enabled postgres libssl needs be available." "$LINENO" 5
 fi
 
 fi

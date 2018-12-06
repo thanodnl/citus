@@ -7,23 +7,16 @@ CREATE FUNCTION citus_reset_default_for_node_conninfo()
 DO LANGUAGE plpgsql
 $$
 BEGIN
-    -- citus requires ssl form this version onwards. For older installations that didn't
-    -- change the citus.node_conninfo setting this will cause the new default value to be
-    -- used.
-    -- This default value is incompatible with postgres' default setting for ssl. When we
-    -- detect that citus.node_conninfo is exactly the same value as the default with ssl
-    -- not turned on we assume it is an upgrade of an older version.
-    -- To not impose the overhead of ssl on customers upgrading we change
-    -- citus.node_conninfo back to the old default.
-    -- During a clean installation of citus on postgres we enable ssl and when required
-    -- generate self signed certificates. When we later hit this point ssl is set to 'on'
-    -- so it will not perform the reset.
+    -- Citus 8.1 and higher default to requiring SSL for all outgoing connections
+    -- (specified by citus.node_conninfo).
+    -- If it looks like we are about to enforce ssl for outgoing connections on a postgres
+    -- installation that do not have ssl turned on we fall back to sslmode=prefer.
+    -- This will only be the case for upgrades from previous versions of Citus, on new
+    -- installations we will have turned on ssl in an earlier stage of the extension
+    -- creation.
     IF
-        TRUE -- hack to easily move around the checks below
-
-		AND current_setting('ssl_ciphers') != 'none' -- test if ssl is compiled into postgres
-		AND NOT current_setting('ssl')::boolean -- test if ssl is off
-		AND current_setting('citus.node_conninfo') = 'sslmode=require' -- test citus.node_conninfo is set to the default value of sslmode=prefer
+        NOT current_setting('ssl')::boolean
+		AND current_setting('citus.node_conninfo') = 'sslmode=require'
 	THEN
 	    PERFORM citus_reset_default_for_node_conninfo();
 	END IF;

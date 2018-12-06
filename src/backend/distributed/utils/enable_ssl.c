@@ -12,8 +12,8 @@
 
 #include "distributed/connection_management.h"
 #include "distributed/worker_protocol.h"
-#include "fmgr.h"
 #include "libpq/libpq.h"
+#include "miscadmin.h"
 #include "nodes/parsenodes.h"
 #include "postmaster/postmaster.h"
 #include "utils/guc.h"
@@ -28,9 +28,6 @@
 #endif
 
 
-#define DirectFunctionCall0(func) \
-	DirectFunctionCall0Coll(func, InvalidOid)
-
 #define ENABLE_SSL_QUERY "ALTER SYSTEM SET ssl TO on;"
 #define RESET_CITUS_NODE_CONNINFO \
 	"ALTER SYSTEM SET citus.node_conninfo TO 'sslmode=prefer';"
@@ -40,16 +37,13 @@
 
 
 /* forward declaration of helper functions */
-static Datum DirectFunctionCall0Coll(PGFunction func, Oid collation);
-
-/* use pg's implementation that is not exposed in a header file */
-extern Datum pg_reload_conf(PG_FUNCTION_ARGS);
+static void GloballyReloadConfig(void);
 
 
 #ifdef USE_SSL
 
 /* forward declaration of functions used when compiled with ssl */
-static void EnsureReleaseOpenSSLResource(MemoryContextCallbackFunction free, void *arg);
+static void EnsureReleaseOpenSSLResource(MemoryContextCallbackFunction func, void *arg);
 static bool ShouldUseAutoSSL(void);
 static bool CreateCertificatesWhenNeeded(void);
 static EVP_PKEY * GeneratePrivateKey(void);
@@ -78,8 +72,8 @@ citus_setup_ssl(PG_FUNCTION_ARGS)
 	{
 		Node *enableSSLParseTree = NULL;
 
-		elog(LOG, "citus extension created on postgres without ssl enabled, turning it "
-				  "on during creation of the extension");
+		ereport(LOG, (errmsg("citus extension created on postgres without ssl enabled, "
+							 "turning it on during creation of the extension")));
 
 		/* execute the alter system statement to enable ssl on within postgres */
 		enableSSLParseTree = ParseTreeNode(ENABLE_SSL_QUERY);
@@ -95,15 +89,7 @@ citus_setup_ssl(PG_FUNCTION_ARGS)
 		CreateCertificatesWhenNeeded();
 
 #if PG_VERSION_NUM >= 100000
-
-		/*
-		 * changing ssl configuration requires a reload of the configuration.
-		 * To make sure the configuration is also loaded in the current postgres backend
-		 * we also call the reload of the config file. This allows later checks during the
-		 * CREATE/ALTER EXTENSION transaction to see the new values.
-		 */
-		DirectFunctionCall0(pg_reload_conf);
-		ProcessConfigFile(PGC_SIGHUP);
+		GloballyReloadConfig();
 #else /* PG_VERSION_NUM < 100000 */
 		ereport(WARNING, (errmsg("restart of postgres required"),
 						  errdetail("citus enables ssl in postgres. Postgres "
@@ -137,47 +123,31 @@ citus_reset_default_for_node_conninfo(PG_FUNCTION_ARGS)
 {
 	Node *resetCitusNodeConnInfoParseTree = NULL;
 
-	elog(LOG, "reset citus.node_conninfo to old default value as the new value is "
-			  "incompatible with the current ssl setting");
+	ereport(LOG, (errmsg("reset citus.node_conninfo to old default value as the new "
+						 "value is incompatible with the current ssl setting")));
 
 	/* execute the alter system statement to reset node_conninfo to the old default*/
 	resetCitusNodeConnInfoParseTree = ParseTreeNode(RESET_CITUS_NODE_CONNINFO);
 	AlterSystemSetConfigFile((AlterSystemStmt *) resetCitusNodeConnInfoParseTree);
-
-	/*
-	 * changing citus.node_conninfo configuration requires a reload of the configuration.
-	 * To make sure the configuration is also loaded in the current postgres backend
-	 * we also call the reload of the config file. This allows later checks during the
-	 * CREATE/ALTER EXTENSION transaction to see the new values.
-	 */
-	DirectFunctionCall0(pg_reload_conf);
-	ProcessConfigFile(PGC_SIGHUP);
+	GloballyReloadConfig();
 
 	PG_RETURN_NULL();
 }
 
 
 /*
- * DirectFunctionCall0Coll is based on the DirectFunctionCallNColl family of functions in
- * postgres, this time to call a function by its pointer without taking any parameters.
+ * GloballyReloadConfig signals postmaster to reload the configuration as well as
+ * reloading the configuration in the current backend. By reloading the configuration in
+ * the current backend the changes will also be reflected in the current transaction.
  */
-static Datum
-DirectFunctionCall0Coll(PGFunction func, Oid collation)
+static void
+GloballyReloadConfig()
 {
-	FunctionCallInfoData fcinfo;
-	Datum result;
-
-	InitFunctionCallInfoData(fcinfo, NULL, 0, collation, NULL, NULL);
-
-	result = (*func)(&fcinfo);
-
-	/* Check for null result, since caller is clearly not expecting one */
-	if (fcinfo.isnull)
+	if (kill(PostmasterPid, SIGHUP))
 	{
-		elog(ERROR, "function %p returned NULL", (void *) func);
+		ereport(WARNING, (errmsg("failed to send signal to postmaster: %m")));
 	}
-
-	return result;
+	ProcessConfigFile(PGC_SIGHUP);
 }
 
 
@@ -188,11 +158,11 @@ DirectFunctionCall0Coll(PGFunction func, Oid collation)
  * current memory context is reset.
  */
 static void
-EnsureReleaseOpenSSLResource(MemoryContextCallbackFunction free, void *arg)
+EnsureReleaseOpenSSLResource(MemoryContextCallbackFunction func, void *arg)
 {
 	MemoryContextCallback *cb = MemoryContextAllocZero(CurrentMemoryContext,
 													   sizeof(MemoryContextCallback));
-	cb->func = free;
+	cb->func = func;
 	cb->arg = arg;
 	MemoryContextRegisterResetCallback(CurrentMemoryContext, cb);
 }
@@ -261,7 +231,7 @@ CreateCertificatesWhenNeeded()
 	{
 		return false;
 	}
-	elog(LOG, "no certificate present, generating self signed certificate");
+	ereport(LOG, (errmsg("no certificate present, generating self signed certificate")));
 
 	privateKey = GeneratePrivateKey();
 	if (!privateKey)
